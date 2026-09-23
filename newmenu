@@ -1405,25 +1405,6 @@ function library:SetTab(tab)
     library.CurrentTab = tab
 end
 
-local combat = library:CreateTab("Combat", "◉")
-
-local killAura = combat:CreateSection("Kill Aura", "left")
-killAura:AddKeybindToggle("Kill Aura", "NONE", false)
-killAura:AddButton("Stop All")
-killAura:AddButton("Run Diagnostic")
-killAura:AddSlider("Hit Distance", 1, 100, 8, nil, 0, " studs")
-killAura:AddSlider("Hit Cooldown", 0.1, 5, 0.5, nil, 1, "s")
-
-local behavior = combat:CreateSection("Behavior", "right")
-behavior:AddToggle("Tool Sound", true)
-behavior:AddToggle("Auto Equip", false)
-
-local targeting = combat:CreateSection("Targeting", "left")
-targeting:AddDropdown("Hit Part", {"Head", "Torso", "HumanoidRootPart"}, "Head")
-targeting:AddDropdown("Target Mode", {"enemies", "everyone", "closest"}, "enemies")
-targeting:AddLabel("Target Team")
-targeting:AddLabel("Target Player")
-
 local settings = library:CreateTab("Settings", "⚙")
 local interfaceSettings = settings:CreateSection("Interface", "left")
 interfaceSettings:AddToggle("UI Keybind", true)
@@ -1601,7 +1582,7 @@ end
 
 refreshSavedConfigs()
 
-library:SetTab(combat)
+library:SetTab(settings)
 
 local keybindEnabled = true
 
