@@ -14,6 +14,56 @@ local library = {}
 library.Flags = {}
 library.Tabs = {}
 library.CurrentTab = nil
+library.ConfigBindings = {}
+library.ConfigState = {}
+
+function library:RegisterConfigBinding(key, setValue, kind, setOptions)
+    if key and type(setValue) == "function" then
+        self.ConfigBindings[key] = {
+            key = key,
+            kind = kind,
+            setValue = setValue,
+            setOptions = type(setOptions) == "function" and setOptions or nil
+        }
+    end
+end
+
+function library:SetDropdownOptions(key, newOptions, defaultValue)
+    if not self.ConfigBindings or not self.ConfigBindings[key] then
+        return false
+    end
+
+    local binding = self.ConfigBindings[key]
+    if type(binding.setOptions) ~= "function" then
+        return false
+    end
+
+    binding.setOptions(newOptions, defaultValue)
+    self.ConfigState[key] = defaultValue or (newOptions and newOptions[1]) or nil
+    self.Flags[key] = self.ConfigState[key]
+    return true
+end
+
+function library:ApplyConfigBinding(key, value)
+    if not self.ConfigBindings then
+        self.ConfigBindings = {}
+    end
+
+    self.ConfigState[key] = value
+
+    local binding = self.ConfigBindings[key]
+    if binding and type(binding.setValue) == "function" then
+        local ok = pcall(function()
+            binding.setValue(value)
+        end)
+        if ok then
+            return true
+        end
+    end
+
+    self.Flags[key] = value
+    return false
+end
 
 local theme = {
     background = Color3.fromRGB(10, 12, 13),
@@ -520,6 +570,66 @@ function library:CreateTab(name, icon)
             return labelObject
         end
 
+        function section:AddTextBox(label, default, callback)
+            local value = tostring(default or "")
+            local row = new("Frame", {
+                Size = UDim2.new(1, 0, 0, 32),
+                BackgroundTransparency = 1
+            }, elements)
+
+            new("TextLabel", {
+                Size = UDim2.new(1, -110, 1, 0),
+                BackgroundTransparency = 1,
+                Text = label,
+                Font = Enum.Font.Gotham,
+                TextSize = 13,
+                TextColor3 = theme.text,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                TextYAlignment = Enum.TextYAlignment.Center
+            }, row)
+
+            local input = new("TextBox", {
+                Size = UDim2.new(0, 110, 0, 24),
+                Position = UDim2.new(1, -110, 0.5, -12),
+                BackgroundColor3 = theme.panel3,
+                BorderSizePixel = 0,
+                Text = value,
+                PlaceholderText = "",
+                Font = Enum.Font.Gotham,
+                TextSize = 12,
+                TextColor3 = theme.text,
+                ClearTextOnFocus = false,
+                TextXAlignment = Enum.TextXAlignment.Center
+            }, row)
+
+            new("UICorner", {
+                CornerRadius = UDim.new(0, 4)
+            }, input)
+
+            new("UIStroke", {
+                Color = theme.borderSoft,
+                Thickness = 1
+            }, input)
+
+            input.FocusLost:Connect(function(enterPressed)
+                value = input.Text
+                library.Flags[label] = value
+                if callback then
+                    callback(value)
+                end
+            end)
+
+            library:RegisterConfigBinding(label, function(v)
+                value = tostring(v or "")
+                input.Text = value
+                library.Flags[label] = value
+            end)
+
+            library.Flags[label] = value
+            registerElement(label, row)
+            return input
+        end
+
         function section:AddButton(label, callback)
             local btn = new("TextButton", {
                 Size = UDim2.new(1, 0, 0, 30),
@@ -619,6 +729,7 @@ function library:CreateTab(name, icon)
                 }):Play()
 
                 library.Flags[label] = value
+                library.ConfigState[label] = value
                 if callback then
                     callback(value)
                 end
@@ -628,6 +739,11 @@ function library:CreateTab(name, icon)
                 value = not value
                 update()
             end)
+
+            library:RegisterConfigBinding(label, function(v)
+                value = v == true
+                update()
+            end, "toggle")
 
             function section:Set(valueToSet)
                 value = valueToSet == true
@@ -713,6 +829,7 @@ function library:CreateTab(name, icon)
                 }):Play()
 
                 library.Flags[label] = enabled
+                library.ConfigState[label] = enabled
                 if callback then
                     callback(enabled, key)
                 end
@@ -752,6 +869,15 @@ function library:CreateTab(name, icon)
                 end
             end)
 
+            library:RegisterConfigBinding(label, function(v)
+                enabled = v == true
+                updateToggle()
+            end, "keybind")
+
+            library:RegisterConfigBinding(label .. " Keybind", function(v)
+                key = tostring(v or "NONE")
+                keyButton.Text = key
+            end, "keybind_name")
             library.Flags[label .. " Keybind"] = key
             registerElement(label, row)
             updateToggle()
@@ -829,6 +955,7 @@ function library:CreateTab(name, icon)
                 valueLabel.Text = tostring(value) .. valueSuffix
 
                 library.Flags[label] = value
+                library.ConfigState[label] = value
                 if callback then
                     callback(value)
                 end
@@ -853,6 +980,10 @@ function library:CreateTab(name, icon)
                 end
             end)
 
+            library:RegisterConfigBinding(label, function(v)
+                setValue(v)
+            end, "slider")
+
             function section:Set(valueToSet)
                 setValue(valueToSet)
             end
@@ -862,7 +993,8 @@ function library:CreateTab(name, icon)
         end
 
         function section:AddDropdown(label, options, default, callback)
-            local selected = default or options[1] or "None"
+            local optionsList = options or {"None"}
+            local selected = default or optionsList[1] or "None"
 
             local row = new("Frame", {
                 Size = UDim2.new(1, 0, 0, 52),
@@ -926,7 +1058,7 @@ function library:CreateTab(name, icon)
             }, dropdown)
 
             local menu = new("Frame", {
-                Size = UDim2.new(1, 0, 0, #options * 30),
+                Size = UDim2.new(1, 0, 0, #optionsList * 30),
                 Position = UDim2.new(0, 0, 1, 5),
                 BackgroundColor3 = theme.panel,
                 BorderSizePixel = 0,
@@ -944,46 +1076,57 @@ function library:CreateTab(name, icon)
                 Thickness = 1
             }, menu)
 
-            new("UIListLayout", {
+            local menuLayout = new("UIListLayout", {
                 SortOrder = Enum.SortOrder.LayoutOrder
             }, menu)
 
-            for _, option in ipairs(options) do
-                local item = new("TextButton", {
-                    Size = UDim2.new(1, 0, 0, 30),
-                    BackgroundColor3 = theme.panel,
-                    BorderSizePixel = 0,
-                    AutoButtonColor = false,
-                    Text = option,
-                    Font = Enum.Font.Gotham,
-                    TextSize = 13,
-                    TextColor3 = theme.text,
-                    TextXAlignment = Enum.TextXAlignment.Left,
-                    ZIndex = 11
-                }, menu)
-
-                new("UIPadding", {
-                    PaddingLeft = UDim.new(0, 8)
-                }, item)
-
-                item.MouseEnter:Connect(function()
-                    item.BackgroundColor3 = theme.hover
-                end)
-
-                item.MouseLeave:Connect(function()
-                    item.BackgroundColor3 = theme.panel
-                end)
-
-                item.MouseButton1Click:Connect(function()
-                    selected = option
-                    dropdownText.Text = selected
-                    menu.Visible = false
-                    library.Flags[label] = selected
-
-                    if callback then
-                        callback(selected)
+            local function rebuildMenu()
+                for _, child in ipairs(menu:GetChildren()) do
+                    if child ~= menuLayout then
+                        child:Destroy()
                     end
-                end)
+                end
+
+                menu.Size = UDim2.new(1, 0, 0, math.max(#optionsList, 1) * 30)
+
+                for _, option in ipairs(optionsList) do
+                    local item = new("TextButton", {
+                        Size = UDim2.new(1, 0, 0, 30),
+                        BackgroundColor3 = theme.panel,
+                        BorderSizePixel = 0,
+                        AutoButtonColor = false,
+                        Text = option,
+                        Font = Enum.Font.Gotham,
+                        TextSize = 13,
+                        TextColor3 = theme.text,
+                        TextXAlignment = Enum.TextXAlignment.Left,
+                        ZIndex = 11
+                    }, menu)
+
+                    new("UIPadding", {
+                        PaddingLeft = UDim.new(0, 8)
+                    }, item)
+
+                    item.MouseEnter:Connect(function()
+                        item.BackgroundColor3 = theme.hover
+                    end)
+
+                    item.MouseLeave:Connect(function()
+                        item.BackgroundColor3 = theme.panel
+                    end)
+
+                    item.MouseButton1Click:Connect(function()
+                        selected = option
+                        dropdownText.Text = selected
+                        menu.Visible = false
+                        library.Flags[label] = selected
+                        library.ConfigState[label] = selected
+
+                        if callback then
+                            callback(selected)
+                        end
+                    end)
+                end
             end
 
             dropdown.MouseButton1Click:Connect(function()
@@ -1018,29 +1161,55 @@ function library:CreateTab(name, icon)
                 end
             end)
 
-            function section:Set(valueToSet)
-                for _, option in ipairs(options) do
+            local function setOptions(newOptions, defaultValue)
+                optionsList = newOptions or {"None"}
+                if #optionsList == 0 then
+                    optionsList = {"None"}
+                end
+
+                selected = defaultValue or optionsList[1] or "None"
+                dropdownText.Text = selected
+                rebuildMenu()
+                library.Flags[label] = selected
+                library.ConfigState[label] = selected
+            end
+
+            local function setDropdownValue(valueToSet)
+                for _, option in ipairs(optionsList) do
                     if option == valueToSet then
                         selected = option
                         dropdownText.Text = selected
                         library.Flags[label] = selected
-
                         if callback then
                             callback(selected)
                         end
-
-                        break
+                        return
                     end
+                end
+                if #optionsList > 0 then
+                    selected = optionsList[1]
+                    dropdownText.Text = selected
+                    library.Flags[label] = selected
                 end
             end
 
+            library:RegisterConfigBinding(label, setDropdownValue, "dropdown", setOptions)
+
+            function section:Set(valueToSet)
+                setDropdownValue(valueToSet)
+            end
+
+            rebuildMenu()
+            setDropdownValue(selected)
             library.Flags[label] = selected
+            library.ConfigState[label] = selected
             registerElement(label, row)
             return row
         end
 
         function section:AddInlineDropdown(label, options, default, callback)
-            local selected = default or options[1] or "None"
+            local optionsList = options or {"None"}
+            local selected = default or optionsList[1] or "None"
 
             local row = new("Frame", {
                 Size = UDim2.new(1, 0, 0, 26),
@@ -1094,7 +1263,7 @@ function library:CreateTab(name, icon)
             }, dropdown)
 
             local menu = new("Frame", {
-                Size = UDim2.new(1, 0, 0, #options * 24),
+                Size = UDim2.new(1, 0, 0, #optionsList * 24),
                 Position = UDim2.new(0, 0, 1, 3),
                 BackgroundColor3 = theme.panel,
                 BorderSizePixel = 0,
@@ -1106,35 +1275,63 @@ function library:CreateTab(name, icon)
                 SortOrder = Enum.SortOrder.LayoutOrder
             }, menu)
 
-            for _, option in ipairs(options) do
-                local item = new("TextButton", {
-                    Size = UDim2.new(1, 0, 0, 24),
-                    BackgroundColor3 = theme.panel,
-                    BorderSizePixel = 0,
-                    AutoButtonColor = false,
-                    Text = option,
-                    Font = Enum.Font.Gotham,
-                    TextSize = 12,
-                    TextColor3 = theme.text,
-                    ZIndex = 11
-                }, menu)
-
-                item.MouseButton1Click:Connect(function()
-                    selected = option
-                    dropdown.Text = selected
-                    menu.Visible = false
-                    library.Flags[label] = selected
-                    if callback then
-                        callback(selected)
+            local function rebuildMenu()
+                for _, child in ipairs(menu:GetChildren()) do
+                    if child ~= menu:GetChildren()[1] then
+                        child:Destroy()
                     end
-                end)
+                end
+
+                for _, option in ipairs(optionsList) do
+                    local item = new("TextButton", {
+                        Size = UDim2.new(1, 0, 0, 24),
+                        BackgroundColor3 = theme.panel,
+                        BorderSizePixel = 0,
+                        AutoButtonColor = false,
+                        Text = option,
+                        Font = Enum.Font.Gotham,
+                        TextSize = 12,
+                        TextColor3 = theme.text,
+                        ZIndex = 11
+                    }, menu)
+
+                    item.MouseButton1Click:Connect(function()
+                        selected = option
+                        dropdown.Text = selected
+                        menu.Visible = false
+                        library.Flags[label] = selected
+                        library.ConfigState[label] = selected
+                        if callback then
+                            callback(selected)
+                        end
+                    end)
+                end
             end
+
+            local function setInlineDropdownValue(valueToSet)
+                for _, option in ipairs(optionsList) do
+                    if option == valueToSet then
+                        selected = option
+                        dropdown.Text = selected
+                        library.Flags[label] = selected
+                        if callback then
+                            callback(selected)
+                        end
+                        return
+                    end
+                end
+            end
+
+            library:RegisterConfigBinding(label, setInlineDropdownValue, "inline_dropdown")
 
             dropdown.MouseButton1Click:Connect(function()
                 menu.Visible = not menu.Visible
             end)
 
+            rebuildMenu()
+            setInlineDropdownValue(selected)
             library.Flags[label] = selected
+            library.ConfigState[label] = selected
             registerElement(label, row)
             return row
         end
@@ -1231,6 +1428,178 @@ local settings = library:CreateTab("Settings", "⚙")
 local interfaceSettings = settings:CreateSection("Interface", "left")
 interfaceSettings:AddToggle("UI Keybind", true)
 interfaceSettings:AddToggle("Performance Mode", false)
+
+local configSection = settings:CreateSection("Config", "full")
+
+local HttpService = game:GetService("HttpService")
+local CONFIG_FOLDER = "AsylumUI/Configs"
+
+local function safeConfigName(name)
+    name = tostring(name or "default")
+    name = string.gsub(name, "[^%w%-%_ ]", "")
+    name = string.gsub(name, "%s+", "_")
+    if name == "" then
+        return "default"
+    end
+    return name
+end
+
+local function ensureConfigFolder()
+    if type(makefolder) ~= "function" then
+        return false
+    end
+
+    local folderExists = type(isfolder) == "function" and isfolder(CONFIG_FOLDER)
+    if not folderExists then
+        if type(isfolder) ~= "function" or not isfolder("AsylumUI") then
+            pcall(makefolder, "AsylumUI")
+        end
+
+        local created = pcall(makefolder, CONFIG_FOLDER)
+        if not created and type(isfolder) == "function" then
+            return isfolder(CONFIG_FOLDER)
+        end
+    end
+
+    return type(isfolder) ~= "function" or isfolder(CONFIG_FOLDER)
+end
+
+local function listSavedConfigs()
+    local configs = {}
+    if type(listfiles) ~= "function" then
+        return configs
+    end
+
+    if type(isfolder) == "function" and isfolder(CONFIG_FOLDER) then
+        for _, file in ipairs(listfiles(CONFIG_FOLDER)) do
+            local normalized = string.gsub(file, "\\", "/")
+            local name = normalized:match("^" .. CONFIG_FOLDER .. "/(.+)%.json$")
+            if name then
+                table.insert(configs, name)
+            end
+        end
+    end
+
+    table.sort(configs)
+    return configs
+end
+
+function library:SaveConfig(name)
+    local configName = safeConfigName(name)
+    if not ensureConfigFolder() or type(writefile) ~= "function" then
+        return false
+    end
+
+    local snapshot = {}
+    for key, value in pairs(self.Flags) do
+        snapshot[key] = value
+    end
+
+    return pcall(function()
+        writefile(CONFIG_FOLDER .. "/" .. configName .. ".json", HttpService:JSONEncode(snapshot))
+    end)
+end
+
+function library:LoadConfig(name)
+    local configName = safeConfigName(name)
+    local filePath = CONFIG_FOLDER .. "/" .. configName .. ".json"
+
+    if type(isfile) ~= "function" or type(readfile) ~= "function" or not isfile(filePath) then
+        return false
+    end
+
+    local success, decoded = pcall(function()
+        return HttpService:JSONDecode(readfile(filePath))
+    end)
+
+    if not success or type(decoded) ~= "table" then
+        return false
+    end
+
+    for key, value in pairs(decoded) do
+        self.Flags[key] = value
+        self:ApplyConfigBinding(key, value)
+    end
+
+    return true
+end
+
+function library:DeleteConfig(name)
+    local configName = safeConfigName(name)
+    local filePath = CONFIG_FOLDER .. "/" .. configName .. ".json"
+
+    if type(isfile) == "function" and isfile(filePath) and type(delfile) == "function" then
+        return pcall(delfile, filePath)
+    end
+
+    return false
+end
+
+function library:ResetConfig()
+    if self.DefaultFlags then
+        for key, value in pairs(self.DefaultFlags) do
+            self.Flags[key] = value
+            self:ApplyConfigBinding(key, value)
+        end
+    end
+end
+
+    local configNameInput = configSection:AddTextBox("Config Name", "default")
+    local savedConfigsSelection = "default"
+    local savedConfigsDropdown = configSection:AddDropdown("Saved Configs", {"default"}, "default", function(value)
+        savedConfigsSelection = value or "default"
+    end)
+
+local function refreshSavedConfigs(preferredName)
+    local configs = listSavedConfigs()
+    if #configs == 0 then
+        configs = {"default"}
+    end
+
+    local selectedName = preferredName or savedConfigsSelection
+    local selectedExists = false
+    for _, configName in ipairs(configs) do
+        if configName == selectedName then
+            selectedExists = true
+            break
+        end
+    end
+
+    savedConfigsSelection = selectedExists and selectedName or configs[1] or "default"
+    library:SetDropdownOptions("Saved Configs", configs, savedConfigsSelection)
+end
+
+configSection:AddButton("Save Config", function()
+    local name = configNameInput.Text ~= "" and configNameInput.Text or "default"
+    local savedName = safeConfigName(name)
+    if library:SaveConfig(savedName) then
+        configNameInput.Text = savedName
+        refreshSavedConfigs(savedName)
+    end
+end)
+
+configSection:AddButton("Load Config", function()
+        local selected = savedConfigsSelection or "default"
+    library:LoadConfig(selected)
+end)
+
+configSection:AddButton("Delete Selected Config", function()
+        local selected = savedConfigsSelection or "default"
+    if library:DeleteConfig(selected) then
+        refreshSavedConfigs()
+    end
+end)
+
+configSection:AddButton("Reset Config", function()
+    library:ResetConfig()
+end)
+
+library.DefaultFlags = {}
+for key, value in pairs(library.Flags) do
+    library.DefaultFlags[key] = value
+end
+
+refreshSavedConfigs()
 
 library:SetTab(combat)
 
